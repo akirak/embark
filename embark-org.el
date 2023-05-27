@@ -242,33 +242,41 @@
 
 (autoload 'org-attach-dir "org-attach")
 
+(defcustom embark-org-link-functions nil
+  ""
+  :type 'hook)
+
 (defun embark-org--refine-link-type (_type target)
   "Refine type of link TARGET if we have more specific actions available."
   (when (string-match org-link-any-re target)
-    (let ((target (or (match-string-no-properties 2 target)
-                      (match-string-no-properties 0 target))))
-      (cond
-       ((string-prefix-p "http" target)
-        (cons 'org-url-link target))
-       ((string-prefix-p "mailto:" target)
-        (cons 'org-email-link (string-remove-prefix "mailto:" target)))
-       ((string-prefix-p "file:" target)
-        (cons 'org-file-link
-              (replace-regexp-in-string
-               "::.*" "" (string-remove-prefix "file:" target))))
-       ((string-prefix-p "attachment:" target)
-        (cons 'org-file-link
-              (expand-file-name
-               (replace-regexp-in-string
-                "::.*" "" (string-remove-prefix "attachment:" target))
-               (org-attach-dir))))
-       ((string-match-p "^[./]" target)
-        (cons 'org-file-link (abbreviate-file-name (expand-file-name target))))
-       ((string-prefix-p "elisp:(" target)
-        (cons 'org-expression-link (string-remove-prefix "elisp:" target)))
-       ((string-prefix-p "elisp:" target)
-        (cons 'command (string-remove-prefix "elisp:" target)))
-       (t (cons 'org-link target))))))
+    (let* ((target (or (match-string-no-properties 2 target)
+                       (match-string-no-properties 0 target)))
+           (type (and (string-match org-link-types-re target)
+                      (match-string 1 target)))
+           (path (substring-no-properties target (match-end 0))))
+      (or (run-hook-with-args-until-success 'embark-org-link-functions
+                                            type path)
+          (pcase type
+            ((or "http" "https")
+             (cons 'org-url-link target))
+            ("mailto"
+             (cons 'org-email-link ()))
+            ("file"
+             (cons 'org-file-link
+                   (replace-regexp-in-string "::.*" "" path)))
+            ("attachment"
+             (cons 'org-file-link
+                   (expand-file-name (replace-regexp-in-string "::.*" "" path)
+                                     (org-attach-dir))))
+            ("elisp"
+             (cons (if (string-prefix-p "(" path)
+                       'org-expression-link
+                     'command)
+                   path))
+            (_
+             (if (string-match-p "^[./]" target)
+                 (cons 'org-file-link (abbreviate-file-name (expand-file-name target)))
+               (cons 'org-link target))))))))
 
 (add-to-list 'embark-transformer-alist
              '(org-link . embark-org--refine-link-type))
